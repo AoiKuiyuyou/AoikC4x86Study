@@ -493,8 +493,8 @@ main(int argc, char **argv)
       else if (i == PRTF) *(int*)je = (int)printf - (int)(je + 4);
       else if (i == MALC) *(int*)je = (int)malloc - (int)(je + 4);
       else if (i == MSET) *(int*)je = (int)memset - (int)(je + 4);
-      else if (i == MCMP) *(int*)je = (int)memcmp;
-      else if (i == EXIT) *(int*)je = (int)exit;
+      else if (i == MCMP) *(int*)je = (int)memcmp - (int)(je + 4);
+      else if (i == EXIT) *(int*)je = (int)exit - (int)(je + 4);
       je = je + 4; // call *(&open)
     }
     else { printf("code generation failed for %d!\n", i); return -1; }
