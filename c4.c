@@ -28,22 +28,24 @@ int *e, *le, *text, // current position in emitted code
     debug;    // print executed instructions
 
 // tokens and classes (operators last and in precedence order)
-enum {
+enum Token {
   Num = 128, Fun, Sys, Glo, Loc, Id,
   Char, Else, Enum, If, Int, Return, While,
   Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
 };
 
 // opcodes
-enum { LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
-       OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-       OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT  };
+enum Opcode { 
+    LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
+    OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
+    OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT
+};
 
 // types
-enum { CHAR, INT, PTR };
+enum Ty { CHAR, INT, PTR };
 
 // identifier offsets (since we can't create an ident struct)
-enum { Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Idsz };
+enum Identifier { Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Idsz };
 
 next()
 {
@@ -489,8 +491,8 @@ main(int argc, char **argv)
       else if (i == READ) *(int*)je = (int)read - (int)(je + 4);
       else if (i == CLOS) *(int*)je = (int)close - (int)(je + 4);
       else if (i == PRTF) *(int*)je = (int)printf - (int)(je + 4);
-      else if (i == MALC) *(int*)je = (int)malloc;
-      else if (i == MSET) *(int*)je = (int)memset;
+      else if (i == MALC) *(int*)je = (int)malloc - (int)(je + 4);
+      else if (i == MSET) *(int*)je = (int)memset - (int)(je + 4);
       else if (i == MCMP) *(int*)je = (int)memcmp;
       else if (i == EXIT) *(int*)je = (int)exit;
       je = je + 4; // call *(&open)
