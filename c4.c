@@ -16,7 +16,7 @@ char *p, *lp, // current position in source code
      *je,     // current position in emitted native code
      *data;   // data/bss pointer
 
-int *e, *le,  // current position in emitted code
+int *e, *le, *text, // current position in emitted code
     *id,      // currently parsed indentifier
     *sym,     // symbol table (simple list of identifiers)
     tk,       // current token
@@ -325,7 +325,7 @@ main(int argc, char **argv)
 
   poolsz = 256*1024; // arbitrary size
   if (!(sym = malloc(poolsz))) { printf("could not malloc(%d) symbol area\n", poolsz); return -1; }
-  if (!(le = e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
+  if (!(text = le = e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
   if (!(data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; }
   if (!(sp = malloc(poolsz))) { printf("could not malloc(%d) stack area\n", poolsz); return -1; }
 
@@ -443,7 +443,7 @@ main(int argc, char **argv)
                            MAP_PRIVATE | MAP_ANON, -1, 0);
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
 
-  pc = le + 1;
+  pc = text + 1;
   je = jitmem;
   // first pass: emit native code
   while (pc <= e) {
@@ -480,15 +480,15 @@ main(int argc, char **argv)
     else if (i == MUL) { *(int *)je = 0xc1af0f59; je = je + 4; } // pop %ecx; imul %ecx, %eax
     else if (i == DIV) { *(int *)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
     else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
-    else if (i == JSR) { ++pc; *(int*)je = 0x15ff;   je = je + 6; } // call *<addr>
+    else if (i == JSR) { ++pc; *(int*)je = 0xe8;     je = je + 5; } // call <off32>
     else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // jz <off8>
     else if (i == BNZ) { ++pc; *(int*)je = 0x75c085; je = je + 4; } // jnz <off8>
     else if (i >= OPEN) {
-      *(int *)je = 0x15ff; je = je + 2;
-      if      (i == OPEN) *(int*)je = (int)open;
-      else if (i == READ) *(int*)je = (int)read;
-      else if (i == CLOS) *(int*)je = (int)close;
-      else if (i == PRTF) *(int*)je = (int)printf;
+      *(int *)je++ = 0xe8;
+      if      (i == OPEN) *(int*)je = (int)open - (int)(je + 4);
+      else if (i == READ) *(int*)je = (int)read - (int)(je + 4);
+      else if (i == CLOS) *(int*)je = (int)close - (int)(je + 4);
+      else if (i == PRTF) *(int*)je = (int)printf - (int)(je + 4);
       else if (i == MALC) *(int*)je = (int)malloc;
       else if (i == MSET) *(int*)je = (int)memset;
       else if (i == MCMP) *(int*)je = (int)memcmp;
@@ -499,22 +499,29 @@ main(int argc, char **argv)
   }
 
   // second pass, relocation
-  pc = le + 1;
+  pc = text + 1;
   while (pc <= e) {
-    i = *pc++;
+    i = *pc & 0xff;
     // the most significant byte is restored from jitmem:
-    je = (char*)(((unsigned)i >> 8) | ((unsigned)jitmem & 0xff000000));
-    i = i & 0xff;
-    if      (i < LEV)  { pc++; }
-    else if (i == JSR) { je += 2; *(int*)je = (int)((*(unsigned*)(*pc) >> 8) | (unsigned)jitmem);
+    je = (char*)(((unsigned)*pc++ >> 8) | (unsigned)jitmem);
+    if (i == JSR) {
+        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem;
+        ++je; *(int*)je = i - (int)(je + 4);
     } // write the absolute address
-    else if (i == JMP) { je++;    *(int*)je = *(char**)pc - (je + 4); } // offset32
-    else if (i == BZ || i == BNZ) { je += 3; *je = (char)(*(char**)pc - (je + 1)); } // offset8
-    ++pc;
+    else if (i == JMP) {
+        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem;
+        ++je; *(int*)je = i - (int)(je + 4);
+    }
+    else if (i == BZ || i == BNZ) {
+        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem;
+        je += 3; *je = (char)(i - (int)(je + 1));
+    }
+    else if (i < LEV)  { pc++; }
   }
 
   // run jitted code
   int (*jitmain)(char**, int); // c4 vm pushes first argument first, unlike cdecl
-  jitmain = *(void **)idmain[Val];
+  i = idmain[Val];
+  jitmain = (void *)(*(unsigned*)i >> 8 | (unsigned)jitmem);
   return jitmain(++argv, --argc);
 }
