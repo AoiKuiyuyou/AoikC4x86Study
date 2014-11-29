@@ -439,7 +439,7 @@ main(int argc, char **argv)
   }
 
   // setup jit memory
-  jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE, 
+  jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANON, -1, 0);
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
 
@@ -447,60 +447,71 @@ main(int argc, char **argv)
   je = jitmem;
   // first pass: emit native code
   while (pc <= e) {
-    i = *pc++;
-    if      (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
+    i = *pc;
+    *pc++ = ((int)je << 8) | i; // for later relocation of JMP/JSR/BZ/BNZ
+    if (i == LEA) {
+      i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: LEA out of bounds\n"); return -1; }
+      *(int *)je = 0x458d + (i << 16); je = je + 3;  // leal $(4 * n)(%ebp), %eax
+    }
+    else if (i == ENT) {
+      i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: ENT out of bounds\n"); return -1; }
+      *(int *)je = 0xe58955; je = je + 3;  // push %ebp; movl %esp, %ebp
+      if (i > 0) {
+        *(int *)je++ = 0xec83; je = je + 2; *(int*)je++ = i; // subl $(i*4), %esp
+      }
+    }
+    else if (i == IMM) { *je++ = 0xb8; *(int *)je = *pc++; je = je + 4; } // movl $imm, %eax
+    else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
+    else if (i == PSH)   *(int *)je++ = 0x50;                    // push %eax
+    else if (i == LEV) { *(int *)je = 0xc35dec89; je = je + 4; } // mov %ebp, %esp; pop %ebp; ret
+    else if (i == LI)  { *(int *)je = 0x008b;     je = je + 2; } // movl (%eax), %eax
+    else if (i == LC)  { *(int *)je = 0x00b60f;   je = je + 3; } // movzbl (%eax), %eax
+    else if (i == SI)  { *(int *)je = 0x018959;   je = je + 3; } // pop %ecx; movl %eax, (%ecx)
+    else if (i == SC)  { *(int *)je = 0x018859;   je = je + 3; } // pop %ecx; movb %al, (%ecx)
+    else if (i == OR)  { *(int *)je = 0xc80959;   je = je + 3; } // pop %ecx; orl %ecx, %eax
+    else if (i == XOR) { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; xorl %ecx, %eax
+    else if (i == AND) { *(int *)je = 0xc82159;   je = je + 3; } // pop %ecx; andl %ecx, %eax
+    else if (i == EQ)  { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; test %ecx, %eax
+    // TODO: GE, NE, LE?
+    else if (i == SHL) { *(int *)je = 0xe0d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shl %cl, %eax
+    else if (i == SHR) { *(int *)je = 0xe8d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shr %cl, %eax
+    else if (i == ADD) { *(int *)je = 0xc80159;   je = je + 3; } // pop %ecx; addl %ecx, %eax
+    else if (i == SUB) { *(int *)je = 0xc8299159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; subl %ecx, %eax
+    else if (i == MUL) { *(int *)je = 0xc1af0f59; je = je + 4; } // pop %ecx; imul %ecx, %eax
+    else if (i == DIV) { *(int *)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
+    else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
     else if (i == JSR) { ++pc; *(int*)je = 0x15ff;   je = je + 6; } // call *<addr>
     else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // jz <off8>
     else if (i == BNZ) { ++pc; *(int*)je = 0x75c085; je = je + 4; } // jnz <off8>
-    else {
-      *(pc - 1) = (int)je; // for later relocation of JMP/JSR/BZ/BNZ
-      if (i == LEA) {
-        i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: LEA out of bounds\n"); return -1; }
-        *(int *)je = 0x458d + (i << 16); je = je + 3;  // leal $(4 * n)(%ebp), %eax
-      }
-      else if (i == ENT) {
-        i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: ENT out of bounds\n"); return -1; }
-        *(int *)je = 0xe58955; je = je + 3;  // push %ebp; movl %esp, %ebp
-        if (i > 0) {
-          *(int *)je++ = 0xec83; je = je + 2; *(int*)je++ = i; // subl $(i*4), %esp
-        }
-      }
-      else if (i == IMM) { *je++ = '\xb8'; *(int *)je = *pc++; je = je + 4; } // movl $imm, %eax
-      else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
-      else if (i == PSH)   *(int *)je++ = 0x50;                    // push %eax
-      else if (i == LEV) { *(int *)je = 0xc35dec89; je = je + 4; } // mov %ebp, %esp; pop %ebp; ret
-      else if (i == LI)  { *(int *)je = 0x008b;     je = je + 2; } // movl (%eax), %eax
-      else if (i == LC)  { *(int *)je = 0x00b60f;   je = je + 3; } // movzbl (%eax), %eax
-      else if (i == SI)  { *(int *)je = 0x018959;   je = je + 3; } // pop %ecx; movl %eax, (%ecx)
-      else if (i == SC)  { *(int *)je = 0x018859;   je = je + 3; } // pop %ecx; movb %al, (%ecx)
-      else if (i == OR)  { *(int *)je = 0xc80959;   je = je + 3; } // pop %ecx; orl %ecx, %eax
-      else if (i == XOR) { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; xorl %ecx, %eax
-      else if (i == AND) { *(int *)je = 0xc82159;   je = je + 3; } // pop %ecx; andl %ecx, %eax
-      else if (i == EQ)  { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; test %ecx, %eax
-      // TODO: GE, NE, LE?
-      else if (i == SHL) { *(int *)je = 0xe0d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shl %cl, %eax
-      else if (i == SHR) { *(int *)je = 0xe8d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shr %cl, %eax
-      else if (i == ADD) { *(int *)je = 0xc80159;   je = je + 3; } // pop %ecx; addl %ecx, %eax
-      else if (i == SUB) { *(int *)je = 0xc8299159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; subl %ecx, %eax
-      else if (i == MUL) { *(int *)je = 0xc1af0f59; je = je + 4; } // pop %ecx; imul %ecx, %eax
-      else if (i == DIV) { *(int *)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
-      else if (i >= OPEN) {
-        *(int *)je = 0x15ff; je = je + 2; 
-        if      (i == OPEN) *(int*)je = (int)open; 
-        else if (i == READ) *(int*)je = (int)read;
-        else if (i == CLOS) *(int*)je = (int)close;
-        else if (i == PRTF) *(int*)je = (int)printf;
-        else if (i == MALC) *(int*)je = (int)malloc;
-        else if (i == MSET) *(int*)je = (int)memset;
-        else if (i == MCMP) *(int*)je = (int)memcmp;
-        else if (i == EXIT) *(int*)je = (int)exit;
-        je = je + 4; // call *(&open)
-      }
-      else { printf("code generation failed for %d!\n", i); return -1; }
+    else if (i >= OPEN) {
+      *(int *)je = 0x15ff; je = je + 2;
+      if      (i == OPEN) *(int*)je = (int)open;
+      else if (i == READ) *(int*)je = (int)read;
+      else if (i == CLOS) *(int*)je = (int)close;
+      else if (i == PRTF) *(int*)je = (int)printf;
+      else if (i == MALC) *(int*)je = (int)malloc;
+      else if (i == MSET) *(int*)je = (int)memset;
+      else if (i == MCMP) *(int*)je = (int)memcmp;
+      else if (i == EXIT) *(int*)je = (int)exit;
+      je = je + 4; // call *(&open)
     }
+    else { printf("code generation failed for %d!\n", i); return -1; }
   }
 
-  // TODO: second pass, relocation
+  // second pass, relocation
+  pc = le + 1;
+  while (pc <= e) {
+    i = *pc++;
+    // the most significant byte is restored from jitmem:
+    je = (char*)(((unsigned)i >> 8) | ((unsigned)jitmem & 0xff000000));
+    i = i & 0xff;
+    if      (i < LEV)  { pc++; }
+    else if (i == JSR) { je += 2; *(int*)je = (int)((*(unsigned*)(*pc) >> 8) | (unsigned)jitmem);
+    } // write the absolute address
+    else if (i == JMP) { je++;    *(int*)je = *(char**)pc - (je + 4); } // offset32
+    else if (i == BZ || i == BNZ) { je += 3; *je = (char)(*(char**)pc - (je + 1)); } // offset8
+    ++pc;
+  }
 
   // run jitted code
   int (*jitmain)(char**, int); // c4 vm pushes first argument first, unlike cdecl
