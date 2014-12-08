@@ -51,10 +51,10 @@ enum Identifier { Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Idsz };
 next()
 {
   char *pp;
+
   while (tk = *p) {
     ++p;
-    if (tk == '\n')
-    {
+    if (tk == '\n') {
       if (src) {
         printf("%d: %.*s", line, p - lp, lp);
         lp = p;
@@ -95,7 +95,8 @@ next()
       if (*p == '/') {
         ++p;
         while (*p != 0 && *p != '\n') ++p;
-      } else {
+      }
+      else {
         tk = Div;
         return;
       }
@@ -273,6 +274,7 @@ expr(int lev)
 stmt()
 {
   int *a, *b;
+
   if (tk == If) {
     next();
     if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
@@ -286,7 +288,8 @@ stmt()
       stmt();
     }
     *b = (int)(e + 1);
-  } else if (tk == While) {
+  }
+  else if (tk == While) {
     next();
     a = e + 1;
     if (tk == '(') next(); else { printf("%d: open paren expected\n", line); exit(-1); }
@@ -296,18 +299,22 @@ stmt()
     stmt();
     *++e = JMP; *++e = (int)a;
     *b = (int)(e + 1);
-  } else if (tk == Return) {
+  }
+  else if (tk == Return) {
     next();
     if (tk != ';') expr(Assign);
     *++e = LEV;
     if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }
-  } else if (tk == '{') {
+  }
+  else if (tk == '{') {
     next();
     while (tk != '}') stmt();
     next();
-  } else if (tk == ';') {
+  }
+  else if (tk == ';') {
     next();
-  } else {
+  }
+  else {
     expr(Assign);
     if (tk == ';') next(); else { printf("%d: semicolon expected\n", line); exit(-1); }
   }
@@ -430,7 +437,8 @@ main(int argc, char **argv)
           }
           id = id + Idsz;
         }
-      } else {
+      }
+      else {
         id[Class] = Glo;
         id[Val] = (int)data;
         data = data + 4;
