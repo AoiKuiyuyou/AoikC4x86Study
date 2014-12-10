@@ -471,7 +471,7 @@ main(int argc, char **argv)
       }
     }
     else if (i == IMM) { *je++ = 0xb8; *(int *)je = *pc++; je = je + 4; } // movl $imm, %eax
-    //else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
+    else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
     else if (i == PSH)   *(int *)je++ = 0x50;                    // push %eax
     else if (i == LEV) { *(int *)je = 0xc35dec89; je = je + 4; } // mov %ebp, %esp; pop %ebp; ret
     else if (i == LI)  { *(int *)je = 0x008b;     je = je + 2; } // movl (%eax), %eax
