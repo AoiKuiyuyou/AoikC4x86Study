@@ -471,7 +471,7 @@ main(int argc, char **argv)
       }
     }
     else if (i == IMM) { *je++ = 0xb8; *(int *)je = *pc++; je = je + 4; } // movl $imm, %eax
-    else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
+    //else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
     else if (i == PSH)   *(int *)je++ = 0x50;                    // push %eax
     else if (i == LEV) { *(int *)je = 0xc35dec89; je = je + 4; } // mov %ebp, %esp; pop %ebp; ret
     else if (i == LI)  { *(int *)je = 0x008b;     je = je + 2; } // movl (%eax), %eax
@@ -494,7 +494,6 @@ main(int argc, char **argv)
     else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // jz <off8>
     else if (i == BNZ) { ++pc; *(int*)je = 0x75c085; je = je + 4; } // jnz <off8>
     else if (i >= OPEN) {
-      *(int *)je++ = 0xe8;
       if      (i == OPEN) tmp = (int)open;
       else if (i == READ) tmp = (int)read;
       else if (i == CLOS) tmp = (int)close;
@@ -503,8 +502,15 @@ main(int argc, char **argv)
       else if (i == MSET) tmp = (int)memset;
       else if (i == MCMP) tmp = (int)memcmp;
       else if (i == EXIT) tmp = (int)exit;
-      *(int*)je = tmp - (int)(je + 4);
-      je = je + 4; // call *(&open)
+      if (*pc++ == ADJ) { i = *pc++; } else { printf("no ADJ after native proc!\n"); exit(2); }
+      *je++ = 0xb9; *(int*)je = i << 2; je += 4;  // movl $(4 * n), %ecx;
+      *(int*)je = 0xce29e689; je += 4; // mov %esp, %esi; sub %ecx, %esi;  -- %esi will adjust the stack
+      *(int*)je = 0x8302e9c1; je += 4; // shr $2, %ecx; and                -- alignment of %esp for OS X
+      *(int*)je = 0x895af0e6; je += 4; // $0xfffffff0, %esi; pop %edx; mov..
+      *(int*)je = 0xe2fc8e54; je += 4; // ..%edx, -4(%esi,%ecx,4); loop..  -- reversing args order
+      *(int*)je = 0xe8f487f9; je += 4; // ..<'pop' offset>; xchg %esi, %esp; call    -- saving old stack in %esi
+      *(int*)je = tmp - (int)(je + 4); je = je + 4; // <*tmp offset>;
+      *(int*)je = 0xf487; je += 2;     // xchg %esi, %esp  -- ADJ, back to old stack without arguments
     }
     else { printf("code generation failed for %d!\n", i); return -1; }
   }
@@ -513,17 +519,13 @@ main(int argc, char **argv)
   pc = text + 1;
   while (pc <= e) {
     i = *pc & 0xff;
-    // the most significant byte is restored from jitmem:
-    je = (char*)(((unsigned)*pc++ >> 8) | (unsigned)jitmem);
-    if (i == JSR || i == JMP) {
-        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem;
-        ++je; *(int*)je = i - (int)(je + 4);
+    je = (char*)(((unsigned)*pc++ >> 8) | (unsigned)jitmem); // MSB is restored from jitmem
+    if (i < LEV) { ++pc; }
+    else if (i == JSR || i == JMP || i == BZ || i == BNZ) {
+        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem; // extract address
+        if      (i == JSR || i == JMP) { je += 1; *(int*)je = i - (int)(je + 4); }
+        else if (i == BZ  || i == BNZ) { je += 3; *je = (char)(i - (int)(je + 1)); }
     }
-    else if (i == BZ || i == BNZ) {
-        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem;
-        je += 3; *je = (char)(i - (int)(je + 1));
-    }
-    else if (i < LEV) { ++pc; }
   }
 
   // run jitted code

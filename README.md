@@ -12,3 +12,11 @@ Try the following:
     ./c4 c4.c hello.c
     ./c4 c4.c c4.c hello.c
 
+
+c4x86 - JIT compiler for x86 in 86 lines
+========================================
+x86 only, not self-hosted!
+
+    gcc -m32 c4x86.c -o c4x86
+    ./c4x86 hello.c
+
