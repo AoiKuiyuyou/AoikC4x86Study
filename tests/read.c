@@ -8,6 +8,7 @@ int main(int argc, char **argv) {
 
     if (!(p = malloc(1024 * 16))) { printf("failed to malloc memory\n"); exit(1); }
 
+    printf("opening %s...\n", *argv);
     fd = open(*argv, 0);
     //if (fd < 0) { printf("failed to open %s\n", *argv); exit(2); }
 

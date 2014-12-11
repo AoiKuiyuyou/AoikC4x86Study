@@ -491,8 +491,8 @@ main(int argc, char **argv)
     else if (i == DIV) { *(int *)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
     else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
     else if (i == JSR) { ++pc; *je       = 0xe8;     je = je + 5; } // call <off32>
-    else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // jz <off8>
-    else if (i == BNZ) { ++pc; *(int*)je = 0x75c085; je = je + 4; } // jnz <off8>
+    else if (i == BZ)  { ++pc; *(int*)je = 0x75c085; je = je + 4; } // jz <off8>
+    else if (i == BNZ) { ++pc; *(int*)je = 0x74c085; je = je + 4; } // jnz <off8>
     else if (i >= OPEN) {
       if      (i == OPEN) tmp = (int)open;
       else if (i == READ) tmp = (int)read;
@@ -531,5 +531,5 @@ main(int argc, char **argv)
   // run jitted code
   int (*jitmain)(char**, int); // c4 vm pushes first argument first, unlike cdecl
   jitmain = (void *)(*(unsigned*)(idmain[Val]) >> 8 | (unsigned)jitmem);
-  return jitmain(++argv, --argc);
+  return jitmain(argv, argc);
 }
