@@ -467,7 +467,7 @@ main(int argc, char **argv)
       i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: ENT out of bounds\n"); return -1; }
       *(int *)je = 0xe58955; je = je + 3;  // push %ebp; movl %esp, %ebp
       if (i > 0) {
-        *(int *)je++ = 0xec83; je = je + 2; *(int*)je++ = i; // subl $(i*4), %esp
+        *(int *)je = 0xec83; je = je + 2; *(int*)je++ = i; // subl $(i*4), %esp
       }
     }
     else if (i == IMM) { *je++ = 0xb8; *(int *)je = *pc++; je = je + 4; } // movl $imm, %eax
@@ -519,13 +519,13 @@ main(int argc, char **argv)
   pc = text + 1;
   while (pc <= e) {
     i = *pc & 0xff;
-    je = (char*)(((unsigned)*pc++ >> 8) | (unsigned)jitmem); // MSB is restored from jitmem
-    if (i < LEV) { ++pc; }
-    else if (i == JSR || i == JMP || i == BZ || i == BNZ) {
-        i = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem; // extract address
-        if      (i == JSR || i == JMP) { je += 1; *(int*)je = i - (int)(je + 4); }
-        else if (i == BZ  || i == BNZ) { je += 3; *je = (char)(i - (int)(je + 1)); }
+    je = (char*)(((unsigned)*pc++ >> 8) | ((unsigned)jitmem & 0xff000000)); // MSB is restored from jitmem
+    if (i == JSR || i == JMP || i == BZ || i == BNZ) {
+        tmp = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem; // extract address
+        if      (i == JSR || i == JMP) { je += 1; *(int*)je = tmp - (int)(je + 4); }
+        else if (i == BZ  || i == BNZ) { je += 3; *je = (char)(tmp - (int)(je + 1)); }
     }
+    else if (i < LEV) { ++pc; }
   }
 
   // run jitted code
