@@ -60,6 +60,13 @@ cmps:
     setle %al
     setne %al
 
+MOD:
+    pop %ecx
+    xchg %ecx, %eax
+    xor %edx, %edx
+    idiv %ecx
+    xchg %edx, %eax
+
 .exit:
     mov %ebp, %esp
     pop %ebp

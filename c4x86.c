@@ -449,13 +449,11 @@ main(int argc, char **argv)
   }
 
   // setup jit memory
-  jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANON, -1, 0);
+  jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
 
-  pc = text + 1;
-  je = jitmem;
   // first pass: emit native code
+  pc = text + 1; je = jitmem;
   while (pc <= e) {
     i = *pc;
     *pc++ = ((int)je << 8) | i; // for later relocation of JMP/JSR/BZ/BNZ
@@ -466,9 +464,7 @@ main(int argc, char **argv)
     else if (i == ENT) {
       i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: ENT out of bounds\n"); return -1; }
       *(int *)je = 0xe58955; je = je + 3;  // push %ebp; movl %esp, %ebp
-      if (i > 0) {
-        *(int *)je = 0xec83; je = je + 2; *(int*)je++ = i; // subl $(i*4), %esp
-      }
+      if (i > 0) { *(int *)je = 0xec83; je = je + 2; *(int*)je++ = i; } // subl $(i*4), %esp
     }
     else if (i == IMM) { *je++ = 0xb8; *(int *)je = *pc++; je = je + 4; } // movl $imm, %eax
     else if (i == ADJ) { i = 4 * *pc++; *(int *)je = 0xc483; je = je + 2; *(int *)je = i; je++; } // addl $(n * 4), %esp
@@ -490,12 +486,13 @@ main(int argc, char **argv)
         else if (i == GE)  { *je = 0x9d; } // setge %al
         je+=4; *je++=0x98;  // cwde
     }
-    else if (i == SHL) { *(int *)je = 0xe0d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shl %cl, %eax
-    else if (i == SHR) { *(int *)je = 0xe8d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shr %cl, %eax
-    else if (i == ADD) { *(int *)je = 0xc80159;   je = je + 3; } // pop %ecx; addl %ecx, %eax
-    else if (i == SUB) { *(int *)je = 0xc8299159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; subl %ecx, %eax
-    else if (i == MUL) { *(int *)je = 0xc1af0f59; je = je + 4; } // pop %ecx; imul %ecx, %eax
-    else if (i == DIV) { *(int *)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
+    else if (i == SHL) { *(int*)je = 0xe0d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shl %cl, %eax
+    else if (i == SHR) { *(int*)je = 0xe8d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shr %cl, %eax
+    else if (i == ADD) { *(int*)je = 0xc80159;   je = je + 3; } // pop %ecx; addl %ecx, %eax
+    else if (i == SUB) { *(int*)je = 0xc8299159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; subl %ecx, %eax
+    else if (i == MUL) { *(int*)je = 0xc1af0f59; je = je + 4; } // pop %ecx; imul %ecx, %eax
+    else if (i == DIV) { *(int*)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
+    else if (i == MOD) { *(int*)je = 0xd2319159; je += 4; *(int *)je = 0x92f9f7; je += 3; }
     else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
     else if (i == JSR) { ++pc; *je       = 0xe8;     je = je + 5; } // call <off32>
     else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // test %eax, %eax; jz <off8>
