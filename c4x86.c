@@ -481,8 +481,15 @@ main(int argc, char **argv)
     else if (i == OR)  { *(int *)je = 0xc80959;   je = je + 3; } // pop %ecx; orl %ecx, %eax
     else if (i == XOR) { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; xorl %ecx, %eax
     else if (i == AND) { *(int *)je = 0xc82159;   je = je + 3; } // pop %ecx; andl %ecx, %eax
-    else if (i == EQ)  { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; test %ecx, %eax
-    // TODO: GE, NE, LE?
+    else if (EQ <= i && i <= GE) {
+        *(int*)je=0x0fc13959; je+=4; *(int*)je=0x9866c094; // pop %ecx; cmp %ecx, %eax; sete %al; cbw; - EQ
+        if      (i == NE)  { *je = 0x95; } // setne %al
+        else if (i == LT)  { *je = 0x9c; } // setl %al
+        else if (i == GT)  { *je = 0x9f; } // setg %al
+        else if (i == LE)  { *je = 0x9e; } // setle %al
+        else if (i == GE)  { *je = 0x9d; } // setge %al
+        je+=4; *je++=0x98;  // cwde
+    }
     else if (i == SHL) { *(int *)je = 0xe0d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shl %cl, %eax
     else if (i == SHR) { *(int *)je = 0xe8d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shr %cl, %eax
     else if (i == ADD) { *(int *)je = 0xc80159;   je = je + 3; } // pop %ecx; addl %ecx, %eax
@@ -491,8 +498,8 @@ main(int argc, char **argv)
     else if (i == DIV) { *(int *)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
     else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
     else if (i == JSR) { ++pc; *je       = 0xe8;     je = je + 5; } // call <off32>
-    else if (i == BZ)  { ++pc; *(int*)je = 0x75c085; je = je + 4; } // jz <off8>
-    else if (i == BNZ) { ++pc; *(int*)je = 0x74c085; je = je + 4; } // jnz <off8>
+    else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // test %eax, %eax; jz <off8>
+    else if (i == BNZ) { ++pc; *(int*)je = 0x75c085; je = je + 4; } // test %eax, %eax; jnz <off8>
     else if (i >= OPEN) {
       if      (i == OPEN) tmp = (int)open;
       else if (i == READ) tmp = (int)read;

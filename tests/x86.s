@@ -1,9 +1,9 @@
-    # ENT 2
+ENT: # 2
     push %ebp  
     mov %esp, %ebp
     subl $8, %esp
 
-    # BZ 0xdeadbeef
+BZ: #0xdeadbeef
     test %eax, %eax 
     jz .exit
     # BNZ 0xdeadbeef
@@ -18,15 +18,47 @@
     movl (%eax), %eax       # LI
     movzb (%eax), %eax      # LC
     
-    # SI
+SI:
     pop %ecx
     movl %eax, (%ecx)
 
-    # SC
+SC:
     pop %ecx
     movb %al, (%ecx)
 
     push %eax
+
+signextend:
+    cbw
+    cwde
+
+GT1:
+    mov %eax, %edx
+    #push %eax pop %edx
+    pop %ecx
+    xor %eax, %eax
+    cmp %edx, %ecx
+    setg %al
+
+GT2:
+    pop  %ecx
+    cmp %eax, %ecx
+    setg %al
+    cbw
+    cwde
+
+EQ1:
+    pop %ecx
+    cmp %eax, %ecx
+    sete %al
+    cbw
+    cwde
+
+cmps:
+    setl %al
+    setge %al
+    setle %al
+    setne %al
 
 .exit:
     mov %ebp, %esp
