@@ -18,23 +18,28 @@ JIT compilation is based on the fact that mapping c4 opcodes into x86 instructio
 | `ADJ` *val*  |`subl $(4 * val), %esp)`                    |
 | `LI`         |`movl (%eax), %eax`                         |
 | `LC`         |`movzbl (%eax), %eax`                       |
-| `SI`         |`pop %ecx; movl %eax, (%ecx)`               |  `%ecx` is used as a temporary register
+| `SI`         |`pop %ecx; movl %eax, (%ecx)`               | `%ecx` is used as a temporary register
 | `SC`         |`pop %ecx; movb %al, (%ecx)`                |
 | `OR`         |`pop %ecx; orl %ecx, %eax`                  |
 | `XOR`        |`pop %ecx; xorl %ecx, %eax`                 |
 | `AND`        |`pop %ecx; andl %ecx, %eax`                 |
-| `EQ`         |`pop %ecx; test %ecx, %eax`                 |
-| `SHL`        |`pop %ecx; xchg %eax, %ecx; shl %cl, %eax`  |  `xchg` adjusts the operands order
+| `NE`         |see `Comparisons`                           | using `setne %al` opcode
+| `EQ`         |see `Comparisons`                           | using `sete %al` opcode
+| `GE`         |see `Comparisons`                           | using `setge %al` opcode
+| `LE`         |see `Comparisons`                           | using `setle %al` opcode
+| `GT`         |see `Comparisons`                           | using `setg %al` opcode
+| `LT`         |see `Comparisons`                           | using `setl %al` opcode
+| `SHL`        |`pop %ecx; xchg %eax, %ecx; shl %cl, %eax`  | `xchg` adjusts the operands order
 | `SHR`        |`pop %ecx; xchg %eax, %ecx; shr %cl, %eax`  |
 | `ADD`        |`pop %ecx; addl %ecx, %eax`                 |
 | `SUB`        |`pop %ecx; xchg %eax, %ecx; subl %ecx, %eax`|
 | `MUL`        |`pop %ecx; imul %ecx, %eax`                 |
 | `DIV`        |`pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax`|
+| `MOD`        |`pop %ecx; xchg %ecx, %eax; xor %edx, %edx; idiv %ecx; xchg %edx, %eax | `%edx` holds remainder after `idiv`
 | `JMP`        |`jmp <off32>`                               |
 | `JSR`        |`call <off32>`                              |
-| `BZ`         |`jz <off8>`                                 |
-| `BNZ`        |`jnz <off8>`                                |
-| `GE`, `NE`, `LE`, `GT`, `LT`   |                          |   not implemented yet
+| `BZ`         |`jz <off32>`                                |
+| `BNZ`        |`jnz <off32>`                               |
 | `OPEN`; `ADJ <n>`  | see `Native calls` section           | *
 | `READ` ; `ADJ <n>` | see `Native calls` section           | *
 | `CLOS` ; `ADJ <n>` | see `Native calls` section           | *
@@ -49,6 +54,20 @@ JIT compilation is based on the fact that mapping c4 opcodes into x86 instructio
 Some executable and writable memory is allocated with `mmap()`, its address in `jitmem` pointer.
 
 First pass of the JIT compiler translates c4 opcodes into instructions directly, leaving stubs for relative offsets in `JSR`, `JMP` (4 byte offset), `BZ`, `BNZ` (1 byte offset) to be filled during the second pass.
+
+Comparisons
+===========
+
+Comparison uses `set<cc>` x86 operations after `cmp %ecx, %eax` where `%ecx` is popped from the stack with ensuing sign-extension of `%al` to `%eax`.
+
+So, the full comparison code for, e.g. `EQ` is:
+
+    pop %ecx
+    cmp %ecx, %eax
+    sete %al            # set %al to 0/1 depending on equality
+    cbw                 # %al to %ax sign extension
+    cwde                # %ax to %eax sign extension
+
 
 Filling up relative offsets
 ===========================

@@ -453,19 +453,19 @@ main(int argc, char **argv)
   while (pc <= e) {
     i = *pc;
     if (src) {
-        while (line++ < srcmap[pc - text])
-            printf("% 4d | %.*s", line, linemap[line + 1] - linemap[line], linemap[line]);
-
+        while (line < srcmap[pc - text]) {
+            line++; printf("% 4d | %.*s", line, linemap[line + 1] - linemap[line], linemap[line]);
+        }
         printf("0x%05x (%p):\t%8.4s", pc - text, je,
                         &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
                          "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                         "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[*pc * 5]);
-        if (*pc <= ADJ) printf(" %d\n", *(pc + 1)); else printf("\n");
+                         "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[i * 5]);
+        if (i <= ADJ) printf(" 0x%x\n", *(pc + 1)); else printf("\n");
     }
     *pc++ = ((int)je << 8) | i; // for later relocation of JMP/JSR/BZ/BNZ
     if (i == LEA) {
       i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: LEA out of bounds\n"); return -1; }
-      *(int *)je = 0x458d + (i << 16); je = je + 3;  // leal $(4 * n)(%ebp), %eax
+      *(int*)je = 0x458d; je = je + 2; *je++ = i;  // leal $(4 * n)(%ebp), %eax
     }
     else if (i == ENT) {
       i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: ENT out of bounds\n"); return -1; }
@@ -501,17 +501,13 @@ main(int argc, char **argv)
     else if (i == MOD) { *(int*)je = 0xd2319159; je += 4; *(int *)je = 0x92f9f7; je += 3; }
     else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
     else if (i == JSR) { ++pc; *je       = 0xe8;     je = je + 5; } // call <off32>
-    else if (i == BZ)  { ++pc; *(int*)je = 0x74c085; je = je + 4; } // test %eax, %eax; jz <off8>
-    else if (i == BNZ) { ++pc; *(int*)je = 0x75c085; je = je + 4; } // test %eax, %eax; jnz <off8>
+    else if (i == BZ)  { ++pc; *(int*)je = 0x840fc085; je = je + 8; } // test %eax, %eax; jz <off32>
+    else if (i == BNZ) { ++pc; *(int*)je = 0x850fc085; je = je + 8; } // test %eax, %eax; jnz <off32>
     else if (i >= OPEN) {
-      if      (i == OPEN) tmp = (int)open;
-      else if (i == READ) tmp = (int)read;
-      else if (i == CLOS) tmp = (int)close;
-      else if (i == PRTF) tmp = (int)printf;
-      else if (i == MALC) tmp = (int)malloc;
-      else if (i == MSET) tmp = (int)memset;
-      else if (i == MCMP) tmp = (int)memcmp;
-      else if (i == EXIT) tmp = (int)exit;
+      if      (i == OPEN) tmp = (int)open;   else if (i == READ) tmp = (int)read;
+      else if (i == CLOS) tmp = (int)close;  else if (i == PRTF) tmp = (int)printf;
+      else if (i == MALC) tmp = (int)malloc; else if (i == MSET) tmp = (int)memset;
+      else if (i == MCMP) tmp = (int)memcmp; else if (i == EXIT) tmp = (int)exit;
       if (*pc++ == ADJ) { i = *pc++; } else { printf("no ADJ after native proc!\n"); exit(2); }
       *je++ = 0xb9; *(int*)je = i << 2; je += 4;  // movl $(4 * n), %ecx;
       *(int*)je = 0xce29e689; je += 4; // mov %esp, %esi; sub %ecx, %esi;  -- %esi will adjust the stack
@@ -531,15 +527,15 @@ main(int argc, char **argv)
     i = *pc & 0xff;
     je = (char*)(((unsigned)*pc++ >> 8) | ((unsigned)jitmem & 0xff000000)); // MSB is restored from jitmem
     if (i == JSR || i == JMP || i == BZ || i == BNZ) {
-        tmp = (*(unsigned*)(*pc++) >> 8) | (unsigned)jitmem; // extract address
+        tmp = (*(unsigned*)(*pc++) >> 8) | ((unsigned)jitmem & 0xff000000); // extract address
         if      (i == JSR || i == JMP) { je += 1; *(int*)je = tmp - (int)(je + 4); }
-        else if (i == BZ  || i == BNZ) { je += 3; *je = (char)(tmp - (int)(je + 1)); }
+        else if (i == BZ  || i == BNZ) { je += 4; *(int*)je = tmp - (int)(je + 4); }
     }
     else if (i < LEV) { ++pc; }
   }
 
   // run jitted code
   int (*jitmain)(char**, int); // c4 vm pushes first argument first, unlike cdecl
-  jitmain = (void *)(*(unsigned*)(idmain[Val]) >> 8 | (unsigned)jitmem);
+  jitmain = (void *)(*(unsigned*)(idmain[Val]) >> 8 | ((unsigned)jitmem & 0xff000000));
   return jitmain(argv, argc);
 }

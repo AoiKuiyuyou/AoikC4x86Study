@@ -10,6 +10,10 @@ BZ: #0xdeadbeef
     test %eax, %eax 
     jnz .exit
 
+    jnz 0x0
+    jz .exit
+    jz 0x0
+
     leal (-4 * 1)(%ebp), %eax    # LEA -1
     movl $42, %eax          # IMM 42
     jmp 0x210         # JMP 0xdeadbeef
