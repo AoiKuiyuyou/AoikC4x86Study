@@ -26,9 +26,8 @@ int *e, *le, *text, // current position in emitted code
     ty,       // current expression type
     loc,      // local variable offset
     line,     // current line number
-    *srcmap,  // maps a bytecode into its line no
-    src,      // print source and assembly flag
-    debug;    // print executed instructions
+    *srcmap,  // maps a bytecode into its corresponding source line number
+    src;      // print source, c4 assembly and JIT addresses
 
 // tokens and classes (operators last and in precedence order)
 enum Token {
@@ -322,8 +321,7 @@ main(int argc, char **argv)
 
   --argc; ++argv;
   if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
-  if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') { debug = 1; --argc; ++argv; }
-  if (argc < 1) { printf("usage: c4 [-s] [-d] file ...\n"); return -1; }
+  if (argc < 1) { printf("usage: c4 [-s] file ...\n"); return -1; }
 
   if ((fd = open(*argv, 0)) < 0) { printf("could not open(%s)\n", *argv); return -1; }
 
