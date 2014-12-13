@@ -15,7 +15,8 @@
 char *p, *lp, // current position in source code
      *jitmem, // executable memory for JIT-compiled native code
      *je,     // current position in emitted native code
-     *data;   // data/bss pointer
+     *data,   // data/bss pointer
+     **linemap; // maps a line number into its source position
 
 int *e, *le, *text, // current position in emitted code
     *id,      // currently parsed indentifier
@@ -25,6 +26,7 @@ int *e, *le, *text, // current position in emitted code
     ty,       // current expression type
     loc,      // local variable offset
     line,     // current line number
+    *srcmap,  // maps a bytecode into its line no
     src,      // print source and assembly flag
     debug;    // print executed instructions
 
@@ -55,16 +57,8 @@ next()
   while (tk = *p) {
     ++p;
     if (tk == '\n') {
-      if (src) {
-        printf("%d: %.*s", line, p - lp, lp);
-        lp = p;
-        while (le < e) {
-          printf("%8.4s", &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
-                           "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                           "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[*++le * 5]);
-          if (*le <= ADJ) printf(" %d\n", *++le); else printf("\n");
-        }
-      }
+      linemap[line] = lp; lp = p;
+      while (le < e) { srcmap[le - text] = line; le++; };
       ++line;
     }
     else if (tk == '#') {
@@ -350,8 +344,10 @@ main(int argc, char **argv)
 
   if (!(lp = p = malloc(poolsz))) { printf("could not malloc(%d) source area\n", poolsz); return -1; }
   if ((i = read(fd, p, poolsz-1)) <= 0) { printf("read() returned %d\n", i); return -1; }
-  p[i] = 0;
   close(fd);
+  p[i] = 0;
+  linemap = (char **)(((int)(p + i + 1) & 0xffffff00) + 0x100);
+  srcmap = text + (poolsz / 8);
 
   // parse declarations
   line = 1;
@@ -453,9 +449,19 @@ main(int argc, char **argv)
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
 
   // first pass: emit native code
-  pc = text + 1; je = jitmem;
+  pc = text + 1; je = jitmem; line = 0;
   while (pc <= e) {
     i = *pc;
+    if (src) {
+        while (line++ < srcmap[pc - text])
+            printf("% 4d | %.*s", line, linemap[line + 1] - linemap[line], linemap[line]);
+
+        printf("0x%05x (%p):\t%8.4s", pc - text, je,
+                        &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
+                         "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
+                         "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[*pc * 5]);
+        if (*pc <= ADJ) printf(" %d\n", *(pc + 1)); else printf("\n");
+    }
     *pc++ = ((int)je << 8) | i; // for later relocation of JMP/JSR/BZ/BNZ
     if (i == LEA) {
       i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: LEA out of bounds\n"); return -1; }
