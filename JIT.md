@@ -35,21 +35,19 @@ JIT compilation is based on the fact that mapping c4 opcodes into x86 instructio
 | `SUB`        |`pop %ecx; xchg %eax, %ecx; subl %ecx, %eax`|
 | `MUL`        |`pop %ecx; imul %ecx, %eax`                 |
 | `DIV`        |`pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax`|
-| `MOD`        |`pop %ecx; xchg %ecx, %eax; xor %edx, %edx; idiv %ecx; xchg %edx, %eax | `%edx` holds remainder after `idiv`
+| `MOD`        |`pop %ecx; xchg %ecx, %eax; xor %edx, %edx; idiv %ecx; xchg %edx, %eax` | `%edx` holds remainder after `idiv`
 | `JMP`        |`jmp <off32>`                               |
 | `JSR`        |`call <off32>`                              |
 | `BZ`         |`jz <off32>`                                |
 | `BNZ`        |`jnz <off32>`                               |
-| `OPEN`; `ADJ <n>`  | see `Native calls` section           | *
-| `READ` ; `ADJ <n>` | see `Native calls` section           | *
-| `CLOS` ; `ADJ <n>` | see `Native calls` section           | *
-| `PRTF` ; `ADJ <n>` | see `Native calls` section           | *
-| `MALC` ; `ADJ <n>` | see `Native calls` section           | *
-| `MSET` ; `ADJ <n>` | see `Native calls` section           | *
-| `MCMP` ; `ADJ <n>` | see `Native calls` section           | *
-| `EXIT` ; `ADJ <n>` | see `Native calls` section           | *
-
-* - see section `Native calls`
+| `OPEN`; `ADJ <n>`  | see `Native calls` section           | 
+| `READ` ; `ADJ <n>` | see `Native calls` section           |
+| `CLOS` ; `ADJ <n>` | see `Native calls` section           |
+| `PRTF` ; `ADJ <n>` | see `Native calls` section           |
+| `MALC` ; `ADJ <n>` | see `Native calls` section           |
+| `MSET` ; `ADJ <n>` | see `Native calls` section           |
+| `MCMP` ; `ADJ <n>` | see `Native calls` section           |
+| `EXIT` ; `ADJ <n>` | see `Native calls` section           |
 
 Some executable and writable memory is allocated with `mmap()`, its address in `jitmem` pointer.
 
@@ -72,7 +70,7 @@ So, the full comparison code for, e.g. `EQ` is:
 Filling up relative offsets
 ===========================
 
-For addresses of compiled "labels" to be known, the first pass stores addresses of compiled x86 code for each c4 opcode in the opcode cell (of `e[]` array) itself:
+For addresses of compiled "labels" to be known, the first pass stores addresses of compiled x86 code for each c4 opcode in the opcode cell (of `text[]` array) itself:
 
     before:    | <opcode> | 0x00    | 0x00   | 0x00    |
     after:     | <opcode> | <least 3 bytes of x86 ptr> |
@@ -81,7 +79,7 @@ The most significant byte is restored from `jitmem` value (it is assumed that th
 
 `JMP`/`JSR`/`BNZ`/`BZ` arguments are not modified.
 
-The second pass reads c4 pointers of `JMP`/`JSR`/`BNZ`/`BZ` and extracts native codes addresses. Then relative offsets are calculated to fill offset gaps in hative code.
+The second pass reads c4 pointers of `JMP`/`JSR`/`BNZ`/`BZ` and extracts native codes addresses. Then relative offsets are calculated to fill offset gaps in native code.
 
 Native calls
 ============
@@ -116,10 +114,9 @@ This is a lengthy and costly solution, but it keeps code size small.
 Issues
 ======
 
-0. this is x86 only; requires Unix-like calls; not self-hosted;
-2. does not handle `LT`, `GT`, `LE`, `GE` opcodes;
-3. uses registers `%eax`, `%ecx`, `%ebp`, `%esp` only with quite redundant memory loads/stores; no register allocation;
-4. it is limited to `open`/`read`/`close`/`printf`/`malloc`/`memset`/`memcmp`/`exit` calls.
+1. this is x86 only; requires Unix-like calls; not self-hosted;
+2. uses registers `%eax`, `%ecx`, `%ebp`, `%esp` only with quite redundant memory loads/stores; no register allocation;
+3. it is limited to `open`/`read`/`close`/`printf`/`malloc`/`memset`/`memcmp`/`exit` calls.
 
 
 (c) Dmytro Sirenko, 2014
