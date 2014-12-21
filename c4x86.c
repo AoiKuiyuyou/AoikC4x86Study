@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <sys/mman.h>
+#include <dlfcn.h>
 
 char *p, *lp, // current position in source code
      *jitmem, // executable memory for JIT-compiled native code
@@ -29,35 +30,35 @@ int *e, *le, *text, // current position in emitted code
     *srcmap,  // maps a bytecode into its corresponding source line number
     src;      // print source, c4 assembly and JIT addresses
 
-// tokens and classes (operators last and in precedence order)
 enum Token {
   Num = 128, Fun, Sys, Glo, Loc, Id,
-  Char, Else, Enum, If, Int, Return, While,
+  Char, Else, Enum, If, Int, Return, Sizeof, While,
   Assign, Cond, Lor, Lan, Or, Xor, And, Eq, Ne, Lt, Gt, Le, Ge, Shl, Shr, Add, Sub, Mul, Div, Mod, Inc, Dec, Brak
 };
 
-// opcodes
 enum Opcode {
   LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
   OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-  OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT
+  OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,MMAP,DSYM,QSRT,EXIT
 };
 
-// types
 enum Ty { CHAR, INT, PTR };
 
 // identifier offsets (since we can't create an ident struct)
 enum Identifier { Tk, Hash, Name, Class, Type, Val, HClass, HType, HVal, Idsz };
 
-next()
+void next()
 {
   char *pp;
 
   while (tk = *p) {
     ++p;
     if (tk == '\n') {
-      linemap[line] = lp; lp = p;
-      while (le < e) { srcmap[le - text] = line; le++; };
+      if (src) {
+        linemap[line] = lp;
+        while (le < e) { srcmap[le - text] = line; le++; };
+      }
+      lp = p;
       ++line;
     }
     else if (tk == '#') {
@@ -79,8 +80,12 @@ next()
       return;
     }
     else if (tk >= '0' && tk <= '9') {
-      ival = tk - '0';
-      while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0';
+      if (ival = tk - '0') { while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0'; }
+      else if (*p == 'x' || *p == 'X') {
+        while ((tk = *++p) && ((tk >= '0' && tk <= '9') || (tk >= 'a' && tk <= 'f') || (tk >= 'A' && tk <= 'F')))
+          ival = ival * 16 + (tk & 15) + (tk >= 'A' ? 9 : 0);
+      }
+      else { while (*p >= '0' && *p <= '7') ival = ival * 8 + *p++ - '0'; }
       tk = Num;
       return;
     }
@@ -123,7 +128,7 @@ next()
   }
 }
 
-expr(int lev)
+void expr(int lev)
 {
   int t, *d;
 
@@ -132,7 +137,15 @@ expr(int lev)
   else if (tk == '"') {
     *++e = IMM; *++e = ival; next();
     while (tk == '"') next();
-    data = (char *)((int)data + 4 & -4); ty = PTR;
+    data = (char *)((int)data + sizeof(int) & -sizeof(int)); ty = PTR;
+  }
+  else if (tk == Sizeof) {
+    next(); if (tk == '(') next(); else { printf("%d: open paren expected in sizeof\n", line); exit(-1); }
+    ty = INT; if (tk == Int) next(); else if (tk == Char) { next(); ty = CHAR; }
+    while (tk == Mul) { next(); ty = ty + PTR; }
+    if (tk == ')') next(); else { printf("%d: close paren expected in sizeof\n", line); exit(-1); }
+    *++e = IMM; *++e = (ty == CHAR) ? sizeof(char) : sizeof(int);
+    ty = INT;
   }
   else if (tk == Id) {
     d = id; next();
@@ -193,7 +206,7 @@ expr(int lev)
     else if (*e == LI) { *e = PSH; *++e = LI; }
     else { printf("%d: bad lvalue in pre-increment\n", line); exit(-1); }
     *++e = PSH;
-    *++e = IMM; *++e = (ty > PTR) ? 4 : 1;
+    *++e = IMM; *++e = (ty > PTR) ? sizeof(int) : sizeof(char);
     *++e = (t == Inc) ? ADD : SUB;
     *++e = (ty == CHAR) ? SC : SI;
   }
@@ -230,12 +243,12 @@ expr(int lev)
     else if (tk == Shr) { next(); *++e = PSH; expr(Add); *++e = SHR; ty = INT; }
     else if (tk == Add) {
       next(); *++e = PSH; expr(Mul);
-      if ((ty = t) > PTR) { *++e = PSH; *++e = IMM; *++e = 4; *++e = MUL;  }
+      if ((ty = t) > PTR) { *++e = PSH; *++e = IMM; *++e = sizeof(int); *++e = MUL;  }
       *++e = ADD;
     }
     else if (tk == Sub) {
       next(); *++e = PSH; expr(Mul);
-      if ((ty = t) > PTR) { *++e = PSH; *++e = IMM; *++e = 4; *++e = MUL;  }
+      if ((ty = t) > PTR) { *++e = PSH; *++e = IMM; *++e = sizeof(int); *++e = MUL;  }
       *++e = SUB;
     }
     else if (tk == Mul) { next(); *++e = PSH; expr(Inc); *++e = MUL; ty = INT; }
@@ -245,17 +258,17 @@ expr(int lev)
       if (*e == LC) { *e = PSH; *++e = LC; }
       else if (*e == LI) { *e = PSH; *++e = LI; }
       else { printf("%d: bad lvalue in post-increment\n", line); exit(-1); }
-      *++e = PSH; *++e = IMM; *++e = (ty > PTR) ? 4 : 1;
+      *++e = PSH; *++e = IMM; *++e = (ty > PTR) ? sizeof(int) : sizeof(char);
       *++e = (tk == Inc) ? ADD : SUB;
       *++e = (ty == CHAR) ? SC : SI;
-      *++e = PSH; *++e = IMM; *++e = (ty > PTR) ? 4 : 1;
+      *++e = PSH; *++e = IMM; *++e = (ty > PTR) ? sizeof(int) : sizeof(char);
       *++e = (tk == Inc) ? SUB : ADD;
       next();
     }
     else if (tk == Brak) {
       next(); *++e = PSH; expr(Assign);
       if (tk == ']') next(); else { printf("%d: close bracket expected\n", line); exit(-1); }
-      if (t > PTR) { *++e = PSH; *++e = IMM; *++e = 4; *++e = MUL;  }
+      if (t > PTR) { *++e = PSH; *++e = IMM; *++e = sizeof(int); *++e = MUL;  }
       else if (t < PTR) { printf("%d: pointer type expected\n", line); exit(-1); }
       *++e = ADD;
       *++e = ((ty = t - PTR) == CHAR) ? LC : LI;
@@ -264,7 +277,7 @@ expr(int lev)
   }
 }
 
-stmt()
+void stmt()
 {
   int *a, *b;
 
@@ -313,7 +326,7 @@ stmt()
   }
 }
 
-main(int argc, char **argv)
+int main(int argc, char **argv)
 {
   int fd, bt, ty, poolsz, *idmain;
   int *pc;
@@ -321,7 +334,7 @@ main(int argc, char **argv)
 
   --argc; ++argv;
   if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
-  if (argc < 1) { printf("usage: c4 [-s] file ...\n"); return -1; }
+  if (argc < 1) { printf("usage: c4x86 [-s] file ...\n"); return -1; }
 
   if ((fd = open(*argv, 0)) < 0) { printf("could not open(%s)\n", *argv); return -1; }
 
@@ -334,18 +347,21 @@ main(int argc, char **argv)
   memset(e,    0, poolsz);
   memset(data, 0, poolsz);
 
-  p = "char else enum if int return while "
-      "open read close printf malloc memset memcmp exit main";
+  p = "char else enum if int return sizeof while "
+      "open read close printf malloc memset memcmp memcpy mmap dlsym qsort exit void main";
   i = Char; while (i <= While) { next(); id[Tk] = i++; } // add keywords to symbol table
   i = OPEN; while (i <= EXIT) { next(); id[Class] = Sys; id[Type] = INT; id[Val] = i++; } // add library to symbol table
+  next(); id[Tk] = Char; // handle void type
   next(); idmain = id; // keep track of main
 
   if (!(lp = p = malloc(poolsz))) { printf("could not malloc(%d) source area\n", poolsz); return -1; }
   if ((i = read(fd, p, poolsz-1)) <= 0) { printf("read() returned %d\n", i); return -1; }
   close(fd);
   p[i] = 0;
-  linemap = (char **)(((int)(p + i + 1) & 0xffffff00) + 0x100);
-  srcmap = text + (poolsz / 8);
+  if (src) {
+    linemap = (char **)(((int)(p + i + 1) & 0xffffff00) + 0x100);
+    srcmap = text + (poolsz / 8);
+  }
 
   // parse declarations
   line = 1;
@@ -435,7 +451,7 @@ main(int argc, char **argv)
       else {
         id[Class] = Glo;
         id[Val] = (int)data;
-        data = data + 4;
+        data = data + sizeof(int);
       }
       if (tk == ',') next();
     }
@@ -502,11 +518,21 @@ main(int argc, char **argv)
     else if (i == BZ)  { ++pc; *(int*)je = 0x840fc085; je = je + 8; } // test %eax, %eax; jz <off32>
     else if (i == BNZ) { ++pc; *(int*)je = 0x850fc085; je = je + 8; } // test %eax, %eax; jnz <off32>
     else if (i >= OPEN) {
-      if      (i == OPEN) tmp = (int)open;   else if (i == READ) tmp = (int)read;
-      else if (i == CLOS) tmp = (int)close;  else if (i == PRTF) tmp = (int)printf;
-      else if (i == MALC) tmp = (int)malloc; else if (i == MSET) tmp = (int)memset;
-      else if (i == MCMP) tmp = (int)memcmp; else if (i == EXIT) tmp = (int)exit;
+      if      (i == OPEN) tmp = (int)open;
+      else if (i == READ) tmp = (int)read;
+      else if (i == CLOS) tmp = (int)close;
+      else if (i == PRTF) tmp = (int)printf;
+      else if (i == MALC) tmp = (int)malloc;
+      else if (i == MSET) tmp = (int)memset;
+      else if (i == MCMP) tmp = (int)memcmp;
+      else if (i == MCPY) tmp = (int)memcpy;
+      else if (i == MMAP) tmp = (int)mmap;
+      else if (i == DSYM) tmp = (int)dlsym;
+      else if (i == QSRT) tmp = (int)qsort;
+      else if (i == EXIT) tmp = (int)exit;
+
       if (*pc++ == ADJ) { i = *pc++; } else { printf("no ADJ after native proc!\n"); exit(2); }
+
       *je++ = 0xb9; *(int*)je = i << 2; je += 4;  // movl $(4 * n), %ecx;
       *(int*)je = 0xce29e689; je += 4; // mov %esp, %esi; sub %ecx, %esi;  -- %esi will adjust the stack
       *(int*)je = 0x8302e9c1; je += 4; // shr $2, %ecx; and                -- alignment of %esp for OS X
