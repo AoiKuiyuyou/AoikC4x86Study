@@ -15,7 +15,6 @@
 
 char *p, *lp, // current position in source code
      *jitmem, // executable memory for JIT-compiled native code
-     *je,     // current position in emitted native code
      *data,   // data/bss pointer
      **linemap; // maps a line number into its source position
 
@@ -39,7 +38,7 @@ enum Token {
 enum Opcode {
   LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
   OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
-  OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,MMAP,DSYM,QSRT,EXIT
+  OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,MMAP,DOPN,DSYM,QSRT,EXIT
 };
 
 enum Ty { CHAR, INT, PTR };
@@ -331,6 +330,9 @@ int main(int argc, char **argv)
   int fd, bt, ty, poolsz, *idmain;
   int *pc;
   int i, tmp; // temps
+  void *dl;
+  int (*jitmain)();
+  char *je;      // current position in emitted native code
 
   --argc; ++argv;
   if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
@@ -348,7 +350,7 @@ int main(int argc, char **argv)
   memset(data, 0, poolsz);
 
   p = "char else enum if int return sizeof while "
-      "open read close printf malloc memset memcmp memcpy mmap dlsym qsort exit void main";
+      "open read close printf malloc memset memcmp memcpy mmap dlopen dlsym qsort exit void main";
   i = Char; while (i <= While) { next(); id[Tk] = i++; } // add keywords to symbol table
   i = OPEN; while (i <= EXIT) { next(); id[Class] = Sys; id[Type] = INT; id[Val] = i++; } // add library to symbol table
   next(); id[Tk] = Char; // handle void type
@@ -458,8 +460,11 @@ int main(int argc, char **argv)
     next();
   }
 
+  dl = dlopen(0, 1); // RTLD_LAZY = 1
+
   // setup jit memory
-  jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  //jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+  jitmem = mmap(0, poolsz, 7, 0x1002, -1, 0);
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
 
   // first pass: emit native code
@@ -498,13 +503,13 @@ int main(int argc, char **argv)
     else if (i == XOR) { *(int *)je = 0xc83159;   je = je + 3; } // pop %ecx; xorl %ecx, %eax
     else if (i == AND) { *(int *)je = 0xc82159;   je = je + 3; } // pop %ecx; andl %ecx, %eax
     else if (EQ <= i && i <= GE) {
-        *(int*)je=0x0fc13959; je+=4; *(int*)je=0x9866c094; // pop %ecx; cmp %ecx, %eax; sete %al; cbw; - EQ
+        *(int*)je=0x0fc13959; je = je + 4; *(int*)je=0x9866c094; // pop %ecx; cmp %ecx, %eax; sete %al; cbw; - EQ
         if      (i == NE)  { *je = 0x95; } // setne %al
         else if (i == LT)  { *je = 0x9c; } // setl %al
         else if (i == GT)  { *je = 0x9f; } // setg %al
         else if (i == LE)  { *je = 0x9e; } // setle %al
         else if (i == GE)  { *je = 0x9d; } // setge %al
-        je+=4; *je++=0x98;  // cwde
+        je=je+4; *je++=0x98;  // cwde
     }
     else if (i == SHL) { *(int*)je = 0xe0d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shl %cl, %eax
     else if (i == SHR) { *(int*)je = 0xe8d39159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; shr %cl, %eax
@@ -512,35 +517,36 @@ int main(int argc, char **argv)
     else if (i == SUB) { *(int*)je = 0xc8299159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; subl %ecx, %eax
     else if (i == MUL) { *(int*)je = 0xc1af0f59; je = je + 4; } // pop %ecx; imul %ecx, %eax
     else if (i == DIV) { *(int*)je = 0xf9f79159; je = je + 4; } // pop %ecx; xchg %eax, %ecx; idiv %ecx, %eax
-    else if (i == MOD) { *(int*)je = 0xd2319159; je += 4; *(int *)je = 0x92f9f7; je += 3; }
+    else if (i == MOD) { *(int*)je = 0xd2319159; je = je + 4; *(int *)je = 0x92f9f7; je = je + 3; }
     else if (i == JMP) { ++pc; *je       = 0xe9;     je = je + 5; } // jmp <off32>
     else if (i == JSR) { ++pc; *je       = 0xe8;     je = je + 5; } // call <off32>
     else if (i == BZ)  { ++pc; *(int*)je = 0x840fc085; je = je + 8; } // test %eax, %eax; jz <off32>
     else if (i == BNZ) { ++pc; *(int*)je = 0x850fc085; je = je + 8; } // test %eax, %eax; jnz <off32>
     else if (i >= OPEN) {
-      if      (i == OPEN) tmp = (int)open;
-      else if (i == READ) tmp = (int)read;
-      else if (i == CLOS) tmp = (int)close;
-      else if (i == PRTF) tmp = (int)printf;
-      else if (i == MALC) tmp = (int)malloc;
-      else if (i == MSET) tmp = (int)memset;
-      else if (i == MCMP) tmp = (int)memcmp;
-      else if (i == MCPY) tmp = (int)memcpy;
-      else if (i == MMAP) tmp = (int)mmap;
-      else if (i == DSYM) tmp = (int)dlsym;
-      else if (i == QSRT) tmp = (int)qsort;
-      else if (i == EXIT) tmp = (int)exit;
+      if      (i == OPEN) tmp = (int)dlsym(dl, "open");
+      else if (i == READ) tmp = (int)dlsym(dl, "read");
+      else if (i == CLOS) tmp = (int)dlsym(dl, "close");
+      else if (i == PRTF) tmp = (int)dlsym(dl, "printf");
+      else if (i == MALC) tmp = (int)dlsym(dl, "malloc");
+      else if (i == MSET) tmp = (int)dlsym(dl, "memset");
+      else if (i == MCMP) tmp = (int)dlsym(dl, "memcmp");
+      else if (i == MCPY) tmp = (int)dlsym(dl, "memcpy");
+      else if (i == MMAP) tmp = (int)dlsym(dl, "mmap");
+      else if (i == DOPN) tmp = (int)dlsym(dl, "dlopen");
+      else if (i == DSYM) tmp = (int)dlsym(dl, "dlsym");
+      else if (i == QSRT) tmp = (int)dlsym(dl, "qsort");
+      else if (i == EXIT) tmp = (int)dlsym(dl, "exit");
 
       if (*pc++ == ADJ) { i = *pc++; } else { printf("no ADJ after native proc!\n"); exit(2); }
 
-      *je++ = 0xb9; *(int*)je = i << 2; je += 4;  // movl $(4 * n), %ecx;
-      *(int*)je = 0xce29e689; je += 4; // mov %esp, %esi; sub %ecx, %esi;  -- %esi will adjust the stack
-      *(int*)je = 0x8302e9c1; je += 4; // shr $2, %ecx; and                -- alignment of %esp for OS X
-      *(int*)je = 0x895af0e6; je += 4; // $0xfffffff0, %esi; pop %edx; mov..
-      *(int*)je = 0xe2fc8e54; je += 4; // ..%edx, -4(%esi,%ecx,4); loop..  -- reversing args order
-      *(int*)je = 0xe8f487f9; je += 4; // ..<'pop' offset>; xchg %esi, %esp; call    -- saving old stack in %esi
+      *je++ = 0xb9; *(int*)je = i << 2; je = je + 4;  // movl $(4 * n), %ecx;
+      *(int*)je = 0xce29e689; je = je + 4; // mov %esp, %esi; sub %ecx, %esi;  -- %esi will adjust the stack
+      *(int*)je = 0x8302e9c1; je = je + 4; // shr $2, %ecx; and                -- alignment of %esp for OS X
+      *(int*)je = 0x895af0e6; je = je + 4; // $0xfffffff0, %esi; pop %edx; mov..
+      *(int*)je = 0xe2fc8e54; je = je + 4; // ..%edx, -4(%esi,%ecx,4); loop..  -- reversing args order
+      *(int*)je = 0xe8f487f9; je = je + 4; // ..<'pop' offset>; xchg %esi, %esp; call    -- saving old stack in %esi
       *(int*)je = tmp - (int)(je + 4); je = je + 4; // <*tmp offset>;
-      *(int*)je = 0xf487; je += 2;     // xchg %esi, %esp  -- ADJ, back to old stack without arguments
+      *(int*)je = 0xf487; je = je + 2;     // xchg %esi, %esp  -- ADJ, back to old stack without arguments
     }
     else { printf("code generation failed for %d!\n", i); return -1; }
   }
@@ -552,14 +558,13 @@ int main(int argc, char **argv)
     je = (char*)(((unsigned)*pc++ >> 8) | ((unsigned)jitmem & 0xff000000)); // MSB is restored from jitmem
     if (i == JSR || i == JMP || i == BZ || i == BNZ) {
         tmp = (*(unsigned*)(*pc++) >> 8) | ((unsigned)jitmem & 0xff000000); // extract address
-        if      (i == JSR || i == JMP) { je += 1; *(int*)je = tmp - (int)(je + 4); }
-        else if (i == BZ  || i == BNZ) { je += 4; *(int*)je = tmp - (int)(je + 4); }
+        if      (i == JSR || i == JMP) { je = je + 1; *(int*)je = tmp - (int)(je + 4); }
+        else if (i == BZ  || i == BNZ) { je = je + 4; *(int*)je = tmp - (int)(je + 4); }
     }
     else if (i < LEV) { ++pc; }
   }
 
   // run jitted code
-  int (*jitmain)(char**, int); // c4 vm pushes first argument first, unlike cdecl
   jitmain = (void *)(*(unsigned*)(idmain[Val]) >> 8 | ((unsigned)jitmem & 0xff000000));
-  return jitmain(argv, argc);
+  return jitmain(argv, argc); // c4 vm pushes first argument first, unlike cdecl
 }
