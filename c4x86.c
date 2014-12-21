@@ -332,7 +332,8 @@ int main(int argc, char **argv)
   int i, tmp; // temps
   void *dl;
   int (*jitmain)();
-  char *je;      // current position in emitted native code
+  char *je,      // current position in emitted native code
+       **jitmap;  // maps c4 bytecode index into native code position
 
   --argc; ++argv;
   if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
@@ -460,12 +461,14 @@ int main(int argc, char **argv)
     next();
   }
 
-  dl = dlopen(0, 1); // RTLD_LAZY = 1
+  dl = dlopen(0, RTLD_LAZY | RTLD_GLOBAL); // RTLD_LAZY = 1
 
   // setup jit memory
   //jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
   jitmem = mmap(0, poolsz, 7, 0x1002, -1, 0);
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
+
+  jitmap = (char **)(jitmem + poolsz / 2);
 
   // first pass: emit native code
   pc = text + 1; je = jitmem; line = 0;
@@ -478,10 +481,11 @@ int main(int argc, char **argv)
         printf("0x%05x (%p):\t%8.4s", pc - text, je,
                         &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
                          "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
-                         "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[i * 5]);
+                         "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,MCPY,MMAP,DOPN,DSYM,QSRT,EXIT,"[i * 5]);
         if (i <= ADJ) printf(" 0x%x\n", *(pc + 1)); else printf("\n");
     }
-    *pc++ = ((int)je << 8) | i; // for later relocation of JMP/JSR/BZ/BNZ
+    jitmap[pc - text] = je;  // for later relocation of JMP/JSR/BZ/BNZ
+    pc++;
     if (i == LEA) {
       i = 4 * *pc++; if (i < -128 || i > 127) { printf("jit: LEA out of bounds\n"); return -1; }
       *(int*)je = 0x458d; je = je + 2; *je++ = i;  // leal $(4 * n)(%ebp), %eax
@@ -554,10 +558,10 @@ int main(int argc, char **argv)
   // second pass, relocation
   pc = text + 1;
   while (pc <= e) {
-    i = *pc & 0xff;
-    je = (char*)(((unsigned)*pc++ >> 8) | ((unsigned)jitmem & 0xff000000)); // MSB is restored from jitmem
+    je = jitmap[pc - text];
+    i = *pc++;
     if (i == JSR || i == JMP || i == BZ || i == BNZ) {
-        tmp = (*(unsigned*)(*pc++) >> 8) | ((unsigned)jitmem & 0xff000000); // extract address
+        tmp = (int)jitmap[(int *)*pc++ - text];
         if      (i == JSR || i == JMP) { je = je + 1; *(int*)je = tmp - (int)(je + 4); }
         else if (i == BZ  || i == BNZ) { je = je + 4; *(int*)je = tmp - (int)(je + 4); }
     }
@@ -565,6 +569,7 @@ int main(int argc, char **argv)
   }
 
   // run jitted code
-  jitmain = (void *)(*(unsigned*)(idmain[Val]) >> 8 | ((unsigned)jitmem & 0xff000000));
+  pc = (int *) idmain[Val];
+  jitmain = (void *) jitmap[ pc - text ];
   return jitmain(argv, argc); // c4 vm pushes first argument first, unlike cdecl
 }
