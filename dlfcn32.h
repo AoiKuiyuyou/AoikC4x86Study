@@ -1,17 +1,16 @@
-#include <windows.h>
-void *mmap(void *addr, size_t len, int prot, int flags, int fildes, off_t off)
+#ifdef _WIN32
+#include <io.h>
+#include <stdlib.h>
+#include <string.h>
+#include "mman32.h"
+enum {
+	RTLD_LAZY = 1,
+	RTLD_GLOBAL = 2
+};
+int dlopen(int x, int y)
 {
-  HANDLE fm, h;
-  void *map;
-  const off_t maxSize = off + (off_t)len;
-
-  h = (HANDLE)_get_osfhandle(fildes);
-  fm = CreateFileMapping(h, NULL, PAGE_EXECUTE_READWRITE, 0, maxSize, NULL);
-  map = MapViewOfFile(fm, FILE_MAP_READ | FILE_MAP_WRITE | FILE_MAP_EXECUTE, 0, off, len);
-  CloseHandle(fm);
-  return map;
+  return 0;
 }
-
 void *dlsym(void *handle, char *name)
 {
   if (!strcmp(name, "open"  )) return &open;
@@ -28,5 +27,6 @@ void *dlsym(void *handle, char *name)
   if (!strcmp(name, "exit"  )) return &exit;
   return 0;
 }
-#define CHAR TYCHAR
-#define INT TYINT
+#else
+#include <dlfcn.h>
+#endif

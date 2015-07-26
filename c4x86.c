@@ -10,8 +10,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <memory.h>
+#ifndef _WIN32
 #include <sys/mman.h>
 #include <dlfcn.h>
+#else
+#include "mman32.h"
+#include "dlfcn32.h"
+#define CHAR TYCHAR
+#define INT TYINT
+#endif
 
 char *p, *lp, // current position in source code
      *jitmem, // executable memory for JIT-compiled native code
@@ -465,7 +472,7 @@ int main(int argc, char **argv)
 
   // setup jit memory
   //jitmem = mmap(0, poolsz, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-  jitmem = mmap(0, poolsz, 7, 0x1002, -1, 0);
+  jitmem = mmap(0, poolsz, 7, 0x1002 | MAP_ANON, -1, 0);
   if (!jitmem) { printf("could not mmap(%d) jit executable memory\n", poolsz); return -1; }
 
   jitmap = (char **)(jitmem + poolsz / 2);
